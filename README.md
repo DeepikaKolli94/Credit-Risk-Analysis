@@ -9,4 +9,4 @@ Major concern in this project was to reduce the false positives and also to get 
 Code for this project is available in Credit Risk Analysis.Rmd file.
 
 # Technology 
-R 
+R Studio
