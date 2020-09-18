@@ -1,0 +1,607 @@
+---
+title: "Credit Risk Analysis"
+author: "Deepika Kolli"
+date: "October 8, 2019"
+output: word_document
+---
+
+#Reading the Data from excel file
+```{r}
+require(XLConnect) 
+wb <- loadWorkbook("C:/R files/German Credit.xls")
+my_data <- readWorksheet(wb,"Data",header=T)
+```
+
+
+#Pie charts for Variables  to get distribution of it with response.
+```{r}
+cols <- c(3,11,14,23,27,29)
+cols1 <- cols-1
+cols1
+my_data[,-cols1]<-lapply(my_data[,-cols1],as.factor)
+colnames(my_data)[colnames(my_data)=="RADIO/TV"] <- "RADIO_TV"
+colnames(my_data)[colnames(my_data)=="CO-APPLICANT"] <- "CO_APPLICANT"
+
+prop.table(table(my_data$RESPONSE))
+categ_vars <-  my_data[,-cols1]
+categ_vars1 <- subset(categ_vars, select = -c(RESPONSE))
+dim(categ_vars)
+
+
+# install.packages("plotly")
+library(plotly)
+library(plyr)
+#as.data.frame(count(categ_vars1,"CHK_ACCT"))
+
+library(ggplot2)
+
+for (i in names(categ_vars1)){
+  # print(i)
+  df<- as.data.frame(count(categ_vars1, i))
+  df2 <- df%>% 
+        mutate(prop = freq / sum(df$freq) *100)
+    
+  pie <-  ggplot(df, aes(x="", y=df2[,3], fill=df2[,1])) + 
+    geom_bar(stat="identity", width=1)
+  
+  # Convert to pie (polar coordinates) and add labels
+  pie <-  pie + coord_polar("y", start=0) + 
+  geom_text(aes(label = paste0(df2[,3], "%")), position = position_stack(vjust = 0.5))+
+    labs(title = paste("The ditribution of",i, 'variable'))
+  
+  print(pie)
+  
+}
+```
+
+
+```{r}
+wb <- loadWorkbook("C:/R files/German Credit.xls")
+my_data <- readWorksheet(wb,"Data",header=T)
+```
+
+#checking the structure of the data
+```{r}
+str(my_data)
+```
+
+
+#Function to convert the categorical variables to factors
+```{r}
+
+factor_convert <- function(x){
+  for(i in 1:(length(x) ))
+  {
+     x[,i] <- as.factor(x[,i])
+     
+  }
+ return(x)
+}
+```
+
+
+# Inputing data to the function except the quantitative variables and removing the OBS variable.
+```{r}
+data1 <- factor_convert(my_data[,-c(1,3,11,14,23,27,29)])
+data<-cbind(data1,my_data[,c(3,11,14,23,27,29)])
+```
+
+
+
+```{r}
+attach(data)
+```
+
+
+#check that the variables are converted to factors
+```{r}
+str(data)
+```
+
+
+#Proportion of Good to Bad Cases in the data.
+```{r}
+tbl<-table(data$RESPONSE)
+prop.table(tbl)
+nrow(data[data$RESPONSE == "1",])/nrow(data[data$RESPONSE == "0",])
+```
+In the dataset, 30% observations are bad credit risk and 70% of the observations are good credit risk. Proportion of "Good" to "Bad" cases is 2.333
+
+
+
+#check the summary of the data( Frequencies for categorical and the quartile values for numerical attributes)
+```{r}
+summary(data)
+```
+
+
+
+#Get the mean and standard deviation values of the numerical attributes.
+```{r}
+cat("Mean values of the numerical attributes are: ",'\n')
+l <- lapply(data[,26:31],mean)
+l
+cat("standard deviation  values of the numerical attributes are: ",'\n')
+l <- lapply(data[,26:31],sd) 
+l
+```
+
+
+## We ran Logistic model to check which are the significant variables
+```{r}
+log_model <- glm(RESPONSE~., data = data, family = "binomial")
+summary(log_model)
+```
+INSTALL_RATE, AMOUNT, FOREIGN, MALE_SINGLE, CHK_ACCT, HISTORY,SAV_ACCT, PRESENT_RESIDENT,DURATION, NEW_CAR are the significant variables. These have a relationship with Target Variable RESPONSE.
+
+
+
+
+## PLOTS
+
+#Bar plot to get the distribution of Response with saving account status type
+```{r}
+library(ggplot2)
+qplot(SAV_ACCT, data=data, geom="bar",
+            fill = RESPONSE ,main="Distribution of Response with saving account status type")
+```
+This plot shows the distribution of the good and bad customers for the status type of savings account.
+Majority of the observations savings account balance is less than 100DM and out of those 63% are good applicants.
+
+
+
+# Bar plot to get the distribution of Response for checking account status type
+```{r}
+qplot(CHK_ACCT, data=data, geom="bar",
+            fill = RESPONSE ,main="Distribution of Response for checking status type")
+```
+Checking account status 0 has higher proportion of bad credit records and status 3 has the least.
+
+
+
+
+#Bar plot to get the distribution of Response based on job type
+```{r}
+qplot(JOB, data=data, geom="bar",
+            fill = RESPONSE ,main="Distribution of Response based on the type of job")
+```
+Majority of the observations are Skilled employee/official and out of those 66% are good customers..
+
+
+
+
+#Bar plot to get the distribution of Response based on credit history
+```{r}
+qplot(HISTORY, data=data, geom="bar",
+            fill = RESPONSE ,main="Distribution of Response based on credit history")
+```
+For the applicants who previously had no credits taken or all credits at this bank paid back duly, higher proportion are tagged as bad credit risk.
+
+
+
+#Bar plot to get the distribution of Response based on if the observation is foreign worker
+```{r}
+qplot(FOREIGN, data=data, geom="bar",
+            fill = RESPONSE ,main="Foriegn worker")
+```
+Out of all the applicants, Only 37 are foriegn workers and out of those only 4 are bad customers.
+
+
+
+
+=========================================================================================================
+#DECISION TREE MODEL USING INFORMATION GAIN (RPART)
+=========================================================================================================
+
+
+##Split the data randomly into training (60%) and test (40%) partitions
+```{r}
+set.seed(768)
+index = sample(2, nrow(data), replace = T, prob = c(0.6,0.4))
+TrainData = data.frame(data[index == 1, ])
+TestData = data.frame(data[index == 2,])
+
+```
+
+
+#PARAMETER TUNING
+
+#Using train function to get the optimal value of CP which gives the highest accuracy.
+```{r}
+library(caret)
+x= TrainData[,-25]
+y =TrainData$RESPONSE
+ctrl = trainControl(method="cv",number =10)
+set.seed(16)
+dtree1 <- train(x,y, method ="rpart", parms = list(split = "information"),metric ="Accuracy", trControl = ctrl, tuneLength = 10)
+print(dtree1)
+
+```
+
+#plotting the Complexity Parameter values with the respective Accuracy
+```{r}
+plot(dtree1)
+```
+The final optimal CP value is 0.01142857.
+
+
+
+
+# Using train function to get the optimal maxdepth value for the tree.
+```{r}
+ctrl = trainControl(method="cv",number =10)
+set.seed(10)
+dtree1 <- train(x,y, method ="rpart2", parms = list(split = "information"),metric ="Accuracy", trControl = ctrl, tuneLength = 10)
+print(dtree1)
+```
+
+
+
+#Plot between max depth value of the tree with accuracy.
+```{r}
+plot(dtree1)
+```
+The final optimal value for maxdepth = 9.
+
+
+
+
+#Now we use the optimal values of CP=0.01142857 and max depth=9 which is  obtained previously to build the decision tree classifier now with information gain criteria.
+```{r}
+library(rpart)
+library(rpart.plot)
+rpart_data = rpart(RESPONSE~., data = TrainData, method = "class", parms = list(split = "information"),control = rpart.control(minsplit = 20, cp = 0.01142857,maxdepth =9))
+```
+
+
+
+#Get the summary of the tree
+```{r}
+summary(rpart_data)
+```
+
+
+#Decision tree
+```{r}
+print(rpart_data)
+
+```
+Root node is CHK_ACCT and the root node error is  0.29863
+
+
+#Decision Tree
+```{r}
+prp(rpart_data, extra = 1, yesno =1 )
+
+```
+
+
+# Best nodes for classifying the good applicants and the corresponding rules
+```{r}
+library(rpart.plot)
+a<- rpart.rules(rpart_data)
+a <- a[a$RESPONSE >=0.70, ]
+cat("These are the rules corresponding to the best nodes for classifying the good customers ",'\n','\n')
+a
+```
+BEST NODES FOR CLASSIFYING GOOD CUSTOMERS ARE:
+CHK_ACCT = 2 or 3 (probabilty of classifying the good customers  0.85), AGE >= 42( probability = 0.88), GUARANTOR = 1 ( probability = 1), HIstory = 3 or 4 ( probability = 0.87), Age <40 (probability = 0.75), REAL_ESTATE = 1(probability = 0.73), AMOUNT >= 2079(Probability = 0.71)
+These nodes are having the least error rates and highest probability for classifying the good customers.
+
+
+
+# Predict on train and test data
+```{r}
+pred_Train = predict(rpart_data,newdata=TrainData, type="class")
+pred_Test = predict(rpart_data, newdata=TestData, type="class")
+```
+
+
+
+#Error Metrics on train and test
+```{r}
+confusionMatrix(TrainData$RESPONSE,pred_Train, positive ="1")
+c <- confusionMatrix(TestData$RESPONSE,pred_Test, positive = "1")
+c
+
+```
+Here our major concern is to reduce the false positives and also have higher true positives. So, we check at sensitivity and specificity values.
+67% Specificty and 76.95% sensitivity values on test data
+
+
+#cost calculation. 
+#Each observation that is Falsely predicted as  positive will give a loss of 500DM and predicting the good customers correctly will have a cost of 100DM. So, we calculate the overall cost that will be incurred.
+```{r}
+Cost <- (c$table[4]*100)-(c$table[2]*500 ) 
+Cost
+```
+The cost incurred will be 15700DM if we predict using this model.
+
+
+
+
+#Now we try to improve our model by finding a better optimal value to minimize the costs incurred.
+#We have predicted the values with threshold of 0.5 but now we try to find the best cutoff value. Also In this scenario false positives are five times as costly as false negatives. So, we give different weights to FP and FN and try to get the optimal cut point.
+
+## We find the best optimal cutoff value and predict on train and test 
+```{r}
+library(ROCR)
+prob_train <- predict(rpart_data, TrainData, type = "prob")
+prob_test <- predict(rpart_data, TestData,type = "prob")
+
+pred_train <- prediction(prob_train[,2], TrainData$RESPONSE) 
+pred_test <- prediction(prob_test[,2],TestData$RESPONSE)
+
+cost.perf = performance(pred_train, "cost", cost.fp = 5, cost.fn = 1)
+
+#Area under curve
+auc = performance(pred_train, "auc")
+auc
+
+plot(cost.perf,main="Explicit cost vs cutoff",col=2,lwd=2)
+
+#Get the optimal cutoff value
+a<-pred_train@cutoffs[[1]] [which.min(cost.perf@y.values[[1]])]
+a
+```
+
+
+
+
+## Error on train and test 
+```{r}
+
+# If the probability is greater than or equal to the threshold value, we predict the class as 1 else 0.
+pred_train_class <- ifelse(prob_train[,2] >= a , "1", "0")
+pred_train_class <- as.factor(pred_train_class)
+
+pred_test_class <- ifelse(prob_test[,2] >= a , "1", "0")
+pred_test_class <- as.factor(pred_test_class)
+
+
+#Evaluation Metrics
+confusionMatrix(pred_train_class, TrainData$RESPONSE, positive = "1")
+c<-confusionMatrix(pred_test_class, TestData$RESPONSE, positive = "1")
+c
+
+```
+Sensitivity is 70.59% and Specificty is 72%. This is giving better metrics than the previous one and also not much difference in error metrics on train and test data that means less variance in the model. 
+
+
+
+
+# Cost calculation
+```{r}
+Cost <- (c$table[4]*100)-(c$table[2]*500 ) 
+Cost
+```
+The cost incurred when we use this model to predict the credit risk will be 2900. This is lower when compared to the previous model. Putting a optimal threshold value helped in classifying better by reducing the false positives.
+
+
+
+
+========================================================================================================
+##Building Decision Tree classifier (CTREE)
+========================================================================================================
+
+#PARAMETER TUNING
+#Using train function to get the optimal value of maxdepth and mincriterian which gives the highest accuracy.
+```{r}
+library(party)
+library(caret)
+x= TrainData[,-25]
+y =TrainData$RESPONSE
+ctrl = trainControl(method="cv",number =10)
+set.seed(8)
+dtree2 <- train(x,y, method ="ctree2", metric ="Accuracy", trControl = ctrl)
+print(dtree2)
+
+```
+The final values used for the optimal model were maxdepth = 3 and mincriterion = 0.01.
+
+
+
+
+#Now we use the optimal values of mincriterian and max depth obtained previously to build the decision tree classifier using ctree
+```{r}
+
+ctree_data = ctree(RESPONSE ~ ., data = TrainData, control = ctree_control(minsplit = 30, mincriterion = 0.01, maxdepth = 3))
+```
+
+
+
+# Predict  for train and test data
+```{r}
+pred_Train = predict(ctree_data,newdata=TrainData, type="response")
+pred_Test = predict(ctree_data, newdata=TestData, type="response")
+```
+
+
+
+#Error Metrics on train and test
+```{r}
+confusionMatrix(TrainData$RESPONSE,pred_Train, positive ="1")
+c <- confusionMatrix(TestData$RESPONSE,pred_Test, positive = "1")
+c
+
+```
+61% Specificity and 75.64% sensitivity values on Test Data.
+
+
+#Cost calculation for this model.
+```{r}
+Cost <- (c$table[4]*100)-(c$table[2]*500 ) 
+Cost
+```
+Cost incurred when we use this model is 13900.
+
+
+
+=========================================================================================================
+##RANDOM FOREST MODEL
+========================================================================================================
+
+#Parameter Tuning 
+#Using tuneRF we try to get the optimal mtry value, i.e the number of variables we choose in each decision tree. We Select mtry value with minimum out of bag(OOB) error.
+```{r}
+library(randomForest)
+mtry <- tuneRF(TrainData[-25],TrainData$RESPONSE, ntreeTry=500, stepFactor=1,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(best.m)
+```
+mtry value of 5 has the least out of bag error. So, we choose this and build the random forest model.
+
+
+
+
+#Build the model
+```{r}
+set.seed(71)
+model_rf <-randomForest(RESPONSE~.,data=TrainData, mtry=best.m, ntree=500)
+print(model_rf)
+```
+
+
+#Important variables plot 
+```{r}
+importance(model_rf)
+varImpPlot(model_rf)
+```
+CHK_ACCT is the variable having the HIGHEST IMPORTANCE( Highest Mean Decrease in GINI)
+
+
+
+
+##Predictions on train and test data
+```{r}
+# Predict on the train data
+preds_train_rf <- predict(model_rf, type ="class")
+confusionMatrix(preds_train_rf, TrainData$RESPONSE, positive = "1")
+
+#predictions on test data
+preds_rf <- predict(model_rf, TestData)
+c<-confusionMatrix(preds_rf, TestData$RESPONSE, positive ="1")
+c
+```
+Specificity is 40.8% which is very low.
+
+
+
+
+#cost calculation
+```{r}
+Cost <- (c$table[4]*100)-(c$table[2]*500 ) 
+Cost
+```
+We can see that as Specifictity for this model is very low, that is False positives are higher, there is a loss of 10000 that is incurred if we use this model to predict.
+
+
+
+## We find the best optimal cutoff value and then calculate the error metrics.
+```{r}
+library(ROCR)
+score1 <- model_rf$votes[,2]
+pred <- prediction(score1, TrainData$RESPONSE) 
+
+cost.perf = performance(pred, "cost", cost.fp = 5, cost.fn = 1)
+a<-pred@cutoffs[[1]] [which.min(cost.perf@y.values[[1]])]
+
+
+# Predict on the train data
+preds_train_rf <- predict(model_rf, TrainData,type ="prob")
+preds_test_rf <- predict(model_rf, TestData,type ="prob")
+
+pred_train_class <- ifelse(preds_train_rf[,2] >= a , "1", "0")
+pred_train_class <- as.factor(pred_train_class)
+
+pred_test_class <- ifelse(preds_test_rf[,2] >= a , "1", "0")
+pred_test_class <- as.factor(pred_test_class)
+
+
+#Error Metrics
+confusionMatrix(pred_train_class, TrainData$RESPONSE, positive = "1")
+c<- confusionMatrix(pred_test_class, TestData$RESPONSE, positive = "1")
+c
+
+```
+Though Specificity value is 83%, sensitivity values is low.
+
+
+#Cost Incurred
+```{r}
+Cost <- (c$table[4]*100)-(c$table[2]*500 ) 
+Cost
+```
+The Cost incurred is 5700 which is low when compared to the model before when the threshold was 0.5
+
+
+
+========================================================================================================
+#DECISION TREE WITH ONLY THE SIGNIFICANT VARIABLES
+========================================================================================================
+
+
+## Took the variables with high meanDecreaseGini from the variable importance plot and trying to build a new decision tree model with only those variables.
+```{r}
+rpart_data = rpart(RESPONSE~ AMOUNT + AGE + CHK_ACCT + DURATION +      HISTORY + EMPLOYMENT + SAV_ACCT + PRESENT_RESIDENT + INSTALL_RATE +  JOB, data = TrainData, method = "class", parms = list(split = "information"),control = rpart.control(minsplit = 30, cp = 0.01142857,maxdepth =9))
+```
+
+
+
+
+## We find the best optimal cutoff value and predict on train and test 
+```{r}
+library(ROCR)
+prob_train <- predict(rpart_data, TrainData, type = "prob")
+prob_test <- predict(rpart_data, TestData,type = "prob")
+
+pred_train <- prediction(prob_train[,2], TrainData$RESPONSE) 
+pred_test <- prediction(prob_test[,2],TestData$RESPONSE)
+
+cost.perf = performance(pred_train, "cost", cost.fp = 5, cost.fn = 1)
+
+#Area under curve
+auc = performance(pred_train, "auc")
+auc
+
+plot(cost.perf,main="Explicit cost vs cutoff",col=2,lwd=2)
+
+#Get the optimal cutoff value
+a<-pred_train@cutoffs[[1]] [which.min(cost.perf@y.values[[1]])]
+a
+```
+
+
+
+
+## Error on train and test data
+```{r}
+
+# If the probability is greater than or equal to the threshold value, we predict the class as 1 else 0.
+pred_train_class <- ifelse(prob_train[,2] >= a , "1", "0")
+pred_train_class <- as.factor(pred_train_class)
+
+pred_test_class <- ifelse(prob_test[,2] >= a , "1", "0")
+pred_test_class <- as.factor(pred_test_class)
+
+
+#Evaluation Metrics
+confusionMatrix(pred_train_class, TrainData$RESPONSE, positive = "1")
+c<-confusionMatrix(pred_test_class, TestData$RESPONSE, positive = "1")
+c
+
+```
+Sensitivity value of 66.78 and specificty of 73.60
+
+
+
+
+#Cost Incurred
+```{r}
+Cost <- (c$table[4]*100)-(c$table[2]*500 ) 
+Cost
+```
+Cost incurred is 2800.
+
+=========================================================================================================
